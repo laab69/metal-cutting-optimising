@@ -144,3 +144,8 @@ class MultiAngleNestingEnv:
 
     def score(self) -> float:
         return self.compute_utilization() * 100.0
+
+
+# Backward-compatible alias
+RotationNestingEnv = MultiAngleNestingEnv
+
