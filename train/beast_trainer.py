@@ -92,11 +92,12 @@ def train_beast_policy(
     np.random.seed(9999)
     eval_instances = [
         np.random.uniform(5.0, 35.0, size=(np.random.randint(min_pieces, max_pieces + 1), 2)).astype(np.float32)
-        for _ in range(50)
+        for _ in range(20)
     ]
 
+    print("[+] Computing Initial Baseline Utilization Floor on Validation Dataset...", flush=True)
     baseline_eval_score = evaluate_policy_on_dataset(baseline_policy, eval_instances)
-    print(f"Initial Baseline Utilization Floor: {baseline_eval_score:.2f}%\n")
+    print(f"[+] Initial Baseline Utilization Floor: {baseline_eval_score:.2f}%\n", flush=True)
 
     history_candidate = []
     history_baseline = []
@@ -153,9 +154,8 @@ def train_beast_policy(
 
         history_loss.append(loss.item())
 
-        # Real-time per-step progress streaming
-        if it % 5 == 0 or it == 1:
-            print(f"Step [{it:4d}/{num_iterations}] | Loss: {loss.item():.4f} | Batch Avg Utilization: {candidate_rewards_t.mean():.2f}% | N={N}", flush=True)
+        # Real-time per-step progress streaming on EVERY iteration!
+        print(f"Step [{it:4d}/{num_iterations}] | Loss: {loss.item():.4f} | Batch Avg Utilization: {candidate_rewards_t.mean():.2f}% | Piece Count N={N}", flush=True)
 
         # Evaluate and test baseline update
         if it % eval_freq == 0:
@@ -222,7 +222,7 @@ def train_beast_policy(
 if __name__ == "__main__":
     train_beast_policy(
         num_iterations=3000,
-        batch_size=64,
+        batch_size=16,
         min_pieces=10,
         max_pieces=30,
         lr=1e-4,
