@@ -49,7 +49,7 @@ def train_beast_policy(
     save_path: str = "model/beast_policy.pt"
 ):
     print("=" * 70)
-    print("🚀 LAUNCHING INDUSTRIAL BEAST-MODE REINFORCE TRAINING (Kool et al. 2019)")
+    print("[LAUNCH] INDUSTRIAL BEAST-MODE REINFORCE TRAINING (Kool et al. 2019)")
     print(f"   Batch Size: {batch_size} | Total Steps: {num_iterations}")
     print(f"   Piece Count per Instance: {min_pieces} to {max_pieces} pieces")
     print(f"   Device: {'CUDA GPU' if torch.cuda.is_available() else 'CPU (Multi-Threaded)'}")
@@ -210,7 +210,7 @@ def train_beast_policy(
             plt.close(fig)
 
     print("=" * 70)
-    print("🏆 BEAST-MODE TRAINING COMPLETE!")
+    print("[SUCCESS] BEAST-MODE TRAINING COMPLETE!")
     print(f"   Final Checkpoint Saved: {save_path}")
     print("=" * 70)
 
