@@ -243,17 +243,23 @@ if st.button("⚡ EXECUTE MULTI-ANGLE AI NESTING ENGINE"):
             candidate_xs = sorted(set([x for x in candidate_xs if 0.0 <= x <= sheet_width - p_w + 1e-4]))
             candidate_ys = sorted(set([y for y in candidate_ys if 0.0 <= y <= sheet_height - p_h + 1e-4]))
 
+            # Prioritize outer corners first over center positions for orthogonal shapes
+            grid_candidates = []
             for y in candidate_ys:
                 for x in candidate_xs:
-                    shifted = translate(rot_poly, xoff=x - minx, yoff=y - miny)
-                    if not sheet_poly.contains(shifted):
-                        continue
+                    dist_from_center = abs(x - (sheet_width - p_w)/2.0) + abs(y - (sheet_height - p_h)/2.0)
+                    grid_candidates.append((dist_from_center, x, y))
 
-                    overlap = any(shifted.intersects(p) and not shifted.touches(p) for p in placed_polygons)
-                    if not overlap:
-                        best_placement = (x, y, ang, shifted)
-                        break
-                if best_placement is not None:
+            grid_candidates.sort(key=lambda c_item: -c_item[0])
+
+            for _, x, y in grid_candidates:
+                shifted = translate(rot_poly, xoff=x - minx, yoff=y - miny)
+                if not sheet_poly.contains(shifted):
+                    continue
+
+                overlap = any(shifted.intersects(p) and not shifted.touches(p) for p in placed_polygons)
+                if not overlap:
+                    best_placement = (x, y, ang, shifted)
                     break
 
             if best_placement is not None:
