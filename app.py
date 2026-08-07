@@ -296,6 +296,6 @@ if st.button("⚡ EXECUTE AI NESTING ENGINE"):
         plt.tight_layout()
         st.pyplot(fig)
 
-    with col_right_table := col_table:
+    with col_table:
         st.subheader("📋 Part Placement Manifest Table")
         st.dataframe(pd.DataFrame(placement_manifest), use_container_width=True, hide_index=True)
