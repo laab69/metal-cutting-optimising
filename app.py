@@ -5,7 +5,7 @@ Production-Ready UI supporting:
 1. Sheet Stock Dimensions (Width, Height).
 2. Custom Parts Inventory (Rectangles, L-Shapes, Triangles, T-Shapes, Trapezoids).
 3. Preset Puzzle Button: 5 Unit Squares in 2.8x2.8 Sheet (Erich Friedman Puzzle).
-4. Multi-Angle AI Nesting Engine (0°, 45°, 90°, 135° Rotations + Shapely 2D Geometry).
+4. Multi-Angle AI Nesting Engine (0°, 45°, 90°, 135° Rotations + Center/Corner Candidate Search).
 5. High-Res Layout Plot, Utilization %, Scrap Ratio, and Placement Manifest.
 """
 
@@ -43,7 +43,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-header">🔩 Industrial Sheet Metal Nesting AI</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Multi-Angle Attention Policy (0°, 45°, 90°, 135°) + Shapely 2D Computational Geometry</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Multi-Angle Attention Policy (0°, 45°, 90°, 135°) + Shapely 2D Geometry Engine</div>', unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------
@@ -88,8 +88,6 @@ if allow_135: candidate_angles.append(135.0)
 if len(candidate_angles) == 0:
     candidate_angles = [0.0]
 
-grid_granularity = st.sidebar.number_input("Placement Search Step (mm)", min_value=0.05, max_value=5.0, value=0.1 if sheet_width < 10 else 1.0, step=0.05)
-
 
 # ---------------------------------------------------------
 # Main UI: Parts Inventory Input & Presets
@@ -121,7 +119,6 @@ with col_btn2:
             {"Part ID": "P3", "Shape": "Triangle", "Width (mm)": 36.0, "Height (mm)": 25.7, "Quantity": 1},
             {"Part ID": "P4", "Shape": "Square / Rectangle", "Width (mm)": 28.0, "Height (mm)": 23.0, "Quantity": 2},
             {"Part ID": "P5", "Shape": "T-Shape", "Width (mm)": 31.2, "Height (mm)": 28.7, "Quantity": 1},
-            {"Part ID": "P6", "Shape": "Trapezoid", "Width (mm)": 25.0, "Height (mm)": 20.0, "Quantity": 1},
         ])
         st.rerun()
 
@@ -201,7 +198,7 @@ if st.button("⚡ EXECUTE MULTI-ANGLE AI NESTING ENGINE"):
         actions_t, _ = policy(batch_t, decode_type="greedy")
         ai_sequence = actions_t[0].cpu().numpy()
 
-    # Geometry Placement Engine with Multi-Angle Support
+    # Placement Engine with Exact Corner/Center Alignment & Centroid Rotation
     sheet_poly = box(0, 0, sheet_width, sheet_height)
     sheet_area = sheet_width * sheet_height
 
@@ -222,16 +219,32 @@ if st.button("⚡ EXECUTE MULTI-ANGLE AI NESTING ENGINE"):
 
         # Test candidate rotation angles for this piece
         for ang in candidate_angles:
-            rot_poly = rotate(poly, ang, origin=(0, 0)) if ang != 0.0 else poly
+            # Rotate around polygon centroid!
+            rot_poly = rotate(poly, ang, origin='center') if ang != 0.0 else poly
 
             minx, miny, maxx, maxy = rot_poly.bounds
             p_w, p_h = maxx - minx, maxy - miny
 
-            xs = np.arange(0.0, sheet_width - p_w + 0.01, grid_granularity)
-            ys = np.arange(0.0, sheet_height - p_h + 0.01, grid_granularity)
+            # Candidate placement origins include corners, sheet center, placed piece boundaries, and fine grid
+            candidate_xs = [0.0, sheet_width - p_w, (sheet_width - p_w) / 2.0]
+            candidate_ys = [0.0, sheet_height - p_h, (sheet_height - p_h) / 2.0]
 
-            for y in ys:
-                for x in xs:
+            for p in placed_polygons:
+                p_minx, p_miny, p_maxx, p_maxy = p.bounds
+                candidate_xs.extend([p_maxx, p_minx - p_w, p_maxx - p_w])
+                candidate_ys.extend([p_maxy, p_miny - p_h, p_maxy - p_h])
+
+            # Also add fine grid steps
+            step_val = 0.05 if sheet_width < 10 else 1.0
+            candidate_xs.extend(np.arange(0.0, max(0.0, sheet_width - p_w) + 0.01, step_val))
+            candidate_ys.extend(np.arange(0.0, max(0.0, sheet_height - p_h) + 0.01, step_val))
+
+            # Filter valid coordinates in range
+            candidate_xs = sorted(set([x for x in candidate_xs if 0.0 <= x <= sheet_width - p_w + 1e-4]))
+            candidate_ys = sorted(set([y for y in candidate_ys if 0.0 <= y <= sheet_height - p_h + 1e-4]))
+
+            for y in candidate_ys:
+                for x in candidate_xs:
                     shifted = translate(rot_poly, xoff=x - minx, yoff=y - miny)
                     if not sheet_poly.contains(shifted):
                         continue
@@ -244,7 +257,7 @@ if st.button("⚡ EXECUTE MULTI-ANGLE AI NESTING ENGINE"):
                     break
 
             if best_placement is not None:
-                break  # Pick first valid angle
+                break
 
         used_mask[piece_idx] = False
 
