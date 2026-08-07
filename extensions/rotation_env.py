@@ -1,42 +1,48 @@
 """
-Rotation-Aware Nesting Environment (`rotation_env.py`)
+Multi-Angle Rotation Nesting Environment (`rotation_env.py`)
 
-WHY THIS CLASS EXISTS:
-Extends the standard NestingEnv to support 90-degree piece rotations.
+WHY THIS MODULE EXISTS:
+Extends the Nesting Environment to support multi-angle rotations (0°, 45°, 90°, 135°).
 
 Action Space Formulation:
-- Total Actions: 2N candidate choices.
-- Actions 0 ... N-1: Place piece in 0-degree orientation (width=w, height=h).
-- Actions N ... 2N-1: Place piece in 90-degree orientation (width=h, height=w).
-
-Dual Action Masking:
-When piece k is placed (either 0° or 90°), BOTH action k AND action k+N are masked out.
-This ensures a piece cannot be placed twice in different orientations.
+- Total Actions: K * N candidate choices (where K = 4 angles: 0°, 45°, 90°, 135°).
+- Multi-Angle Action Masking: Placing piece k in ANY angle masks out ALL K angle candidates 
+  (k, k+N, k+2N, k+3N), ensuring a piece is placed exactly once.
 """
 
 import numpy as np
 from typing import Dict, List, Tuple, Any, Optional
+import shapely
+from shapely.geometry import Polygon, box
+from shapely.affinity import translate, rotate
 from env.generator import generate_instance
-from env.decoder import place_bottom_left
 
 
-class RotationNestingEnv:
+SUPPORTED_ANGLES = [0.0, 45.0, 90.0, 135.0]
+
+
+class MultiAngleNestingEnv:
     def __init__(
         self,
         sheet_width: float = 100.0,
         sheet_height: float = 100.0,
-        num_pieces: int = 10
+        num_pieces: int = 10,
+        angles: List[float] = None
     ):
         self.sheet_width = float(sheet_width)
         self.sheet_height = float(sheet_height)
+        self.sheet_poly = box(0, 0, self.sheet_width, self.sheet_height)
         self.sheet_area = self.sheet_width * self.sheet_height
         self.num_pieces = num_pieces
+        self.angles = angles if angles is not None else SUPPORTED_ANGLES
+        self.num_angles = len(self.angles)
 
         self.pieces: Optional[np.ndarray] = None
-        self.mask: Optional[np.ndarray] = None  # Shape: (2N,)
-        self.placed_rects: List[Tuple[float, float, float, float]] = []
+        self.polygons: List[Polygon] = []
+        self.mask: Optional[np.ndarray] = None  # Shape: (K * N,)
+        self.placed_polygons: List[Polygon] = []
         self.placed_indices: List[int] = []
-        self.placed_rotations: List[bool] = []
+        self.placed_angles: List[float] = []
         self.step_count: int = 0
 
     def reset(self, pieces: Optional[np.ndarray] = None, seed: Optional[int] = None) -> Dict[str, Any]:
@@ -51,11 +57,14 @@ class RotationNestingEnv:
                 seed=seed
             )
 
-        # Action space size is 2N (N unrotated + N rotated)
-        self.mask = np.ones(2 * self.num_pieces, dtype=bool)
-        self.placed_rects = []
+        # Convert rectangular dimensions to Shapely Polygon objects
+        self.polygons = [Polygon([(0, 0), (w, 0), (w, h), (0, h)]) for w, h in self.pieces]
+
+        # Action space size is K * N
+        self.mask = np.ones(self.num_angles * self.num_pieces, dtype=bool)
+        self.placed_polygons = []
         self.placed_indices = []
-        self.placed_rotations = []
+        self.placed_angles = []
         self.step_count = 0
 
         return self._get_state()
@@ -64,42 +73,58 @@ class RotationNestingEnv:
         return {
             "pieces": self.pieces.copy(),
             "mask": self.mask.copy(),
-            "placed_rects": list(self.placed_rects),
+            "placed_polygons": list(self.placed_polygons),
             "step_count": self.step_count,
             "utilization": self.compute_utilization()
         }
 
+    def place_polygon_at_angle(self, poly: Polygon, angle: float, grid_step: float = 1.0) -> Optional[Polygon]:
+        """
+        Rotates polygon by target angle and finds lowest-leftmost valid coordinate on sheet.
+        """
+        rotated_poly = rotate(poly, angle, origin=(0, 0)) if angle != 0.0 else poly
+
+        minx, miny, maxx, maxy = rotated_poly.bounds
+        poly_w = maxx - minx
+        poly_h = maxy - miny
+
+        xs = np.arange(0.0, self.sheet_width - poly_w + 0.1, grid_step)
+        ys = np.arange(0.0, self.sheet_height - poly_h + 0.1, grid_step)
+
+        for y in ys:
+            for x in xs:
+                shifted = translate(rotated_poly, xoff=x - minx, yoff=y - miny)
+                if not self.sheet_poly.contains(shifted):
+                    continue
+
+                overlap = any(shifted.intersects(p) and not shifted.touches(p) for p in self.placed_polygons)
+                if not overlap:
+                    return shifted
+
+        return None
+
     def step(self, action_idx: int) -> Tuple[Dict[str, Any], float, bool, Dict[str, Any]]:
         if not self.mask[action_idx]:
-            raise ValueError(f"Invalid Action: Action {action_idx} is already masked!")
+            raise ValueError(f"Action Error: Action {action_idx} is already masked!")
 
-        # Determine original piece index and rotation flag
         piece_idx = action_idx % self.num_pieces
-        is_rotated = (action_idx >= self.num_pieces)
+        angle_idx = action_idx // self.num_pieces
+        target_angle = self.angles[angle_idx]
 
-        orig_w, orig_h = self.pieces[piece_idx]
-        w, h = (orig_h, orig_w) if is_rotated else (orig_w, orig_h)
+        poly = self.polygons[piece_idx]
+        placed_poly = self.place_polygon_at_angle(poly, target_angle)
 
-        # Pass effective (w, h) to bottom-left decoder
-        placement = place_bottom_left(
-            piece_w=w,
-            piece_h=h,
-            sheet_w=self.sheet_width,
-            sheet_h=self.sheet_height,
-            placed_rects=self.placed_rects
-        )
+        # Multi-Angle Action Masking: mask out ALL angle candidates for piece_idx
+        for a_i in range(self.num_angles):
+            self.mask[piece_idx + a_i * self.num_pieces] = False
 
-        # Dual Masking: disable BOTH 0° and 90° choices for this piece
-        self.mask[piece_idx] = False
-        self.mask[piece_idx + self.num_pieces] = False
         self.step_count += 1
 
         placed_successfully = False
-        if placement is not None:
-            x, y = placement
-            self.placed_rects.append((x, y, w, h))
+        if placed_poly is not None:
+            self.placed_polygons.append(placed_poly)
             self.placed_indices.append(piece_idx)
-            self.placed_rotations.append(is_rotated)
+            self.placed_angles.append(target_angle)
             placed_successfully = True
 
         done = (self.step_count == self.num_pieces)
@@ -108,13 +133,13 @@ class RotationNestingEnv:
         info = {
             "placed_successfully": placed_successfully,
             "piece_idx": piece_idx,
-            "is_rotated": is_rotated
+            "angle": target_angle
         }
 
         return self._get_state(), reward, done, info
 
     def compute_utilization(self) -> float:
-        total_placed_area = sum(w * h for _, _, w, h in self.placed_rects)
+        total_placed_area = sum(p.area for p in self.placed_polygons)
         return float(total_placed_area / self.sheet_area)
 
     def score(self) -> float:
