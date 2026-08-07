@@ -3,7 +3,7 @@ Industrial Sheet Metal Nesting AI — Final Production App (`app.py`)
 
 Production-Ready UI supporting:
 1. Sheet Stock Dimensions (Width, Height).
-2. Custom Drawn Polygon Creator & Part Inventory Table.
+2. Custom Mouse Canvas Polygon Drawer (`streamlit-drawable-canvas`).
 3. Preset Puzzles: 5 Unit Squares in 2.8x2.8 Sheet, Factory Order, Custom Drawn Shapes.
 4. Multi-Angle AI Nesting Engine (0°, 45°, 90°, 135° Rotations + Shapely 2D Geometry).
 5. High-Res Layout Plot, Utilization %, Scrap Ratio, and Placement Manifest.
@@ -20,6 +20,7 @@ import streamlit as st
 import shapely
 from shapely.geometry import Polygon, box
 from shapely.affinity import translate, rotate
+from streamlit_drawable_canvas import st_canvas
 
 from extensions.rotation_policy import RotationAttentionPolicy
 
@@ -43,7 +44,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-header">🔩 Industrial Sheet Metal Nesting AI</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Multi-Angle Attention Policy + Custom Polygon Creator & Shapely 2D Geometry</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Multi-Angle Attention Policy + Interactive Mouse Polygon Drawer & Shapely Geometry</div>', unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------
@@ -58,10 +59,6 @@ SHAPE_LIBRARY = {
 }
 
 def parse_vertices_string(vert_str: str) -> Polygon:
-    """
-    Parses a string of (x, y) coordinates into a Shapely Polygon.
-    Example: '(0,0), (30,0), (30,15), (0,15)'
-    """
     try:
         cleaned = vert_str.replace("(", "").replace(")", "").replace("[", "").replace("]", "")
         nums = [float(val.strip()) for val in cleaned.split(",") if val.strip()]
@@ -107,11 +104,11 @@ if len(candidate_angles) == 0:
 
 
 # ---------------------------------------------------------
-# Main UI: Parts Inventory & Custom Polygon Drawer
+# Main UI: Parts Inventory & Mouse Polygon Drawer
 # ---------------------------------------------------------
-st.subheader("📦 2. Parts Inventory & Custom Polygon Creator")
+st.subheader("📦 2. Parts Inventory & Mouse Polygon Canvas Drawer")
 
-tab1, tab2 = st.tabs(["📝 Standard Parts Table & Presets", "✏️ Draw Custom Polygon Vertices"])
+tab1, tab2 = st.tabs(["📝 Standard Parts Table & Presets", "🖱️ Draw Custom Polygon with Mouse"])
 
 with tab1:
     col_btn1, col_btn2 = st.columns(2)
@@ -163,47 +160,69 @@ with tab1:
     )
 
 with tab2:
-    st.markdown("### ✏️ Custom Polygon Creator & Live Preview")
-    col_draw, col_prev = st.columns([1, 1])
+    st.markdown("### 🖱️ Mouse Polygon Canvas Drawer")
+    st.caption("Click on the interactive canvas below to draw polygon vertices with your mouse. Double click or complete the shape to close it!")
 
-    with col_draw:
-        custom_id = st.text_input("Custom Part ID", value="Custom_Shape_1")
-        custom_vert_input = st.text_area(
-            "Enter Polygon Vertices (X, Y) Coordinates",
-            value="(0, 0), (35, 0), (35, 12), (15, 12), (15, 28), (0, 28)",
-            help="Enter list of (x, y) coordinate pairs for the polygon vertices."
+    col_canvas, col_mouse_info = st.columns([1.2, 1])
+
+    with col_canvas:
+        drawing_mode = st.radio("Drawing Tool Mode:", ("polygon", "freedraw"), horizontal=True)
+
+        canvas_result = st_canvas(
+            fill_color="rgba(59, 130, 246, 0.3)",
+            stroke_width=2,
+            stroke_color="#1E3A8A",
+            background_color="#F8FAFC",
+            height=350,
+            width=450,
+            drawing_mode=drawing_mode,
+            key="mouse_canvas",
         )
-        custom_qty = st.number_input("Quantity to Add", min_value=1, max_value=10, value=2)
 
-        if st.button("➕ Add Custom Drawn Polygon to Order List"):
-            new_row = pd.DataFrame([{
-                "Part ID": custom_id,
-                "Shape": "Custom Drawn Polygon",
-                "Width (mm)": 35.0,
-                "Height (mm)": 28.0,
-                "Quantity": custom_qty,
-                "Custom Vertices": custom_vert_input
-            }])
-            st.session_state["parts_df"] = pd.concat([edited_df, new_row], ignore_index=True)
-            st.success(f"Added '{custom_id}' to the parts inventory!")
-            st.rerun()
+    with col_mouse_info:
+        st.markdown("### 📋 Mouse Shape Status")
+        mouse_part_id = st.text_input("Custom Mouse Part ID", value="Mouse_Polygon_1")
+        mouse_qty = st.number_input("Quantity to Add to Order", min_value=1, max_value=10, value=2)
 
-    with col_prev:
-        st.markdown("### 🔍 Shape Geometry Live Preview")
-        preview_poly = parse_vertices_string(custom_vert_input)
-        fig_prev, ax_prev = plt.subplots(figsize=(4, 4))
+        coords_str = ""
+        extracted_coords = []
 
-        x_coords, y_coords = preview_poly.exterior.xy
-        ax_prev.fill(x_coords, y_coords, color='#3B82F6', alpha=0.7, edgecolor='black', linewidth=2)
-        ax_prev.scatter(x_coords, y_coords, color='red', zorder=5)
+        if canvas_result.json_data is not None:
+            objects = canvas_result.json_data.get("objects", [])
+            if len(objects) > 0:
+                last_obj = objects[-1]
+                obj_type = last_obj.get("type")
 
-        for i, (x, y) in enumerate(zip(x_coords[:-1], y_coords[:-1])):
-            ax_prev.text(x, y, f" P{i+1}\n({x:.0f},{y:.0f})", fontsize=8, fontweight='bold')
+                if obj_type == "path":
+                    path_data = last_obj.get("path", [])
+                    for p in path_data:
+                        if len(p) >= 3 and p[0] in ["M", "L"]:
+                            extracted_coords.append((round(float(p[1]) / 10.0, 1), round((350 - float(p[2])) / 10.0, 1)))
 
-        ax_prev.set_aspect('equal')
-        ax_prev.set_title(f"Custom Polygon Preview (Area = {preview_poly.area:.1f} mm²)", fontweight='bold', fontsize=10)
-        ax_prev.grid(True, linestyle='--', alpha=0.5)
-        st.pyplot(fig_prev)
+                elif obj_type == "polygon":
+                    points = last_obj.get("points", [])
+                    for pt in points:
+                        extracted_coords.append((round(float(pt["x"]) / 10.0, 1), round((350 - float(pt["y"])) / 10.0, 1)))
+
+        if len(extracted_coords) >= 3:
+            coords_str = ", ".join([f"({x},{y})" for x, y in extracted_coords])
+            st.success(f"Detected {len(extracted_coords)} Vertices from Mouse Drawing!")
+            st.code(coords_str, language="text")
+
+            if st.button("➕ Add Mouse Drawn Polygon to Order List"):
+                new_row = pd.DataFrame([{
+                    "Part ID": mouse_part_id,
+                    "Shape": "Custom Drawn Polygon",
+                    "Width (mm)": 30.0,
+                    "Height (mm)": 30.0,
+                    "Quantity": mouse_qty,
+                    "Custom Vertices": coords_str
+                }])
+                st.session_state["parts_df"] = pd.concat([edited_df, new_row], ignore_index=True)
+                st.success(f"Added Mouse Drawn Polygon '{mouse_part_id}' to order inventory!")
+                st.rerun()
+        else:
+            st.info("Draw a shape on the left canvas with your mouse to extract vertices.")
 
 st.divider()
 
