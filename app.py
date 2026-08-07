@@ -20,7 +20,6 @@ import streamlit as st
 import shapely
 from shapely.geometry import Polygon, box
 from shapely.affinity import translate, rotate
-from streamlit_drawable_canvas import st_canvas
 
 from extensions.rotation_policy import RotationAttentionPolicy
 
