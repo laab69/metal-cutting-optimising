@@ -166,16 +166,17 @@ with tab2:
     col_canvas, col_mouse_info = st.columns([1.2, 1])
 
     with col_canvas:
-        drawing_mode = st.radio("Drawing Tool Mode:", ("polygon", "freedraw"), horizontal=True)
+        drawing_mode = st.radio("Drawing Tool Mode:", ("freedraw", "polygon", "rect"), horizontal=True)
 
         canvas_result = st_canvas(
-            fill_color="rgba(59, 130, 246, 0.3)",
-            stroke_width=2,
+            fill_color="rgba(59, 130, 246, 0.4)",
+            stroke_width=4,
             stroke_color="#1E3A8A",
             background_color="#F8FAFC",
             height=350,
             width=450,
             drawing_mode=drawing_mode,
+            update_streamlit=True,
             key="mouse_canvas",
         )
 
@@ -196,13 +197,25 @@ with tab2:
                 if obj_type == "path":
                     path_data = last_obj.get("path", [])
                     for p in path_data:
-                        if len(p) >= 3 and p[0] in ["M", "L"]:
-                            extracted_coords.append((round(float(p[1]) / 10.0, 1), round((350 - float(p[2])) / 10.0, 1)))
+                        if len(p) >= 3 and p[0] in ["M", "L", "Q", "C"]:
+                            extracted_coords.append((round(float(p[1]) / 10.0, 1), round((350.0 - float(p[2])) / 10.0, 1)))
 
                 elif obj_type == "polygon":
                     points = last_obj.get("points", [])
                     for pt in points:
-                        extracted_coords.append((round(float(pt["x"]) / 10.0, 1), round((350 - float(pt["y"])) / 10.0, 1)))
+                        extracted_coords.append((round(float(pt["x"]) / 10.0, 1), round((350.0 - float(pt["y"])) / 10.0, 1)))
+
+                elif obj_type == "rect":
+                    left = round(float(last_obj.get("left", 0)) / 10.0, 1)
+                    top = round((350.0 - float(last_obj.get("top", 0))) / 10.0, 1)
+                    rw = round(float(last_obj.get("width", 20)) / 10.0, 1)
+                    rh = round(float(last_obj.get("height", 20)) / 10.0, 1)
+                    extracted_coords = [
+                        (left, top - rh),
+                        (left + rw, top - rh),
+                        (left + rw, top),
+                        (left, top)
+                    ]
 
         if len(extracted_coords) >= 3:
             coords_str = ", ".join([f"({x},{y})" for x, y in extracted_coords])
