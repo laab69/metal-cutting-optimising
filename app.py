@@ -1,292 +1,301 @@
 """
-Streamlit Web Application UI (`app.py`)
+Industrial Sheet Metal Nesting AI — Final Production App (`app.py`)
 
-Interactive AI Sheet Metal Nesting Dashboard
-
-Features:
-1. Select Nesting Strategy: Trained AI Policy (Zero-Shot), Largest-First Heuristic, Random Policy, 90° Rotation, or Shapely Irregular Polygons.
-2. Custom Instance Generation: Adjust number of pieces, sheet dimensions, random seed, or enter custom piece sizes.
-3. Real-time Matplotlib Layout Rendering & Metrics (Utilization %, Latency ms, Placed Count).
-4. Side-by-Side Comparison: Trained Neural Network vs. Classical Heuristic.
+A production-ready UI for factory operators and engineers:
+1. Input Sheet Metal Stock Dimensions (Width, Height).
+2. Input Custom Parts Inventory (Add Rectangles, Rotated Parts, L-Shapes, Triangles, T-Shapes, Trapezoids).
+3. Execute Unified AI Nesting Engine (90° Rotation Policy + Shapely 2D Geometry Placement).
+4. View High-Resolution Nested Sheet Layout, Utilization %, Scrap Ratio, and Cutting Manifest Table.
 """
 
 import os
 import time
 import torch
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import streamlit as st
+import shapely
+from shapely.geometry import Polygon, box
+from shapely.affinity import translate
 
-from env.generator import generate_instance
-from env.nesting_env import NestingEnv
-from baseline.largest_first import run_largest_first_heuristic
-from model.policy import AttentionPolicy
-from extensions.rotation_env import RotationNestingEnv
 from extensions.rotation_policy import RotationAttentionPolicy
-from extensions.polygon_env import PolygonNestingEnv, generate_polygon_instance
 
 
-# Set Streamlit Page Config with wide layout and custom title
+# ---------------------------------------------------------
+# Page Configuration & Custom CSS
+# ---------------------------------------------------------
 st.set_page_config(
-    page_title="NCO Sheet Metal Nesting",
-    page_icon="⚙️",
+    page_title="Industrial Metal Nesting AI",
+    page_icon="🔩",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-st.title("⚙️ Neural Combinatorial Optimization for Sheet Metal Nesting")
-st.caption("Deep Reinforcement Learning (Pointer Networks / Attention Model) for Zero-Shot Metal Part Nesting")
+st.markdown("""
+<style>
+    .main-header { font-size: 2.2rem; font-weight: 700; color: #1E293B; margin-bottom: 0px; }
+    .sub-header { font-size: 1.0rem; color: #64748B; margin-bottom: 20px; }
+    .stButton>button { width: 100%; font-weight: bold; background-color: #0F172A; color: white; border-radius: 8px; height: 48px; }
+    .metric-card { background-color: #F8FAFC; padding: 15px; border-radius: 8px; border: 1px solid #E2E8F0; }
+</style>
+""", unsafe_allow_html=True)
+
+st.markdown('<div class="main-header">🔩 Industrial Sheet Metal Nesting AI</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Production Nesting Engine: Transformer Attention Policy + 90° Rotation + Shapely 2D Geometry</div>', unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------
-# Sidebar Controls
+# Shapely Polygon Templates
 # ---------------------------------------------------------
-st.sidebar.header("🎛️ Simulation Controls")
-
-selected_mode = st.sidebar.selectbox(
-    "Select Nesting Strategy",
-    options=[
-        "Trained Scaled AI Policy (N=20, Rollout Baseline)",
-        "Trained Standard AI Policy (N=10)",
-        "Largest-Piece-First Heuristic",
-        "Random Placement Policy",
-        "90° Rotation Action Space Policy",
-        "Shapely Irregular Polygon Nesting"
-    ]
-)
-
-st.sidebar.subheader("📐 Sheet & Piece Parameters")
-
-sheet_w = st.sidebar.slider("Sheet Width", min_value=50.0, max_value=200.0, value=100.0, step=10.0)
-sheet_h = st.sidebar.slider("Sheet Height", min_value=50.0, max_value=200.0, value=100.0, step=10.0)
-
-num_pieces = st.sidebar.slider("Number of Pieces (N)", min_value=5, max_value=30, value=10 if "N=10" in selected_mode else 20, step=1)
-rand_seed = st.sidebar.number_input("Random Seed", min_value=1, max_value=99999, value=42, step=1)
-
-enable_side_by_side = st.sidebar.checkbox("Compare AI vs. Heuristic Side-by-Side", value=True)
-
-# ---------------------------------------------------------
-# Cached Model Loaders
-# ---------------------------------------------------------
-@st.cache_resource
-def load_scaled_model(sheet_w, sheet_h):
-    path = "model/scaled_policy.pt"
-    policy = AttentionPolicy(input_dim=2, d_model=128, num_heads=8, num_layers=2, sheet_width=sheet_w, sheet_height=sheet_h)
-    if os.path.exists(path):
-        ckpt = torch.load(path, map_location='cpu')
-        policy.load_state_dict(ckpt['model_state_dict'])
-    policy.eval()
-    return policy
-
-@st.cache_resource
-def load_standard_model(sheet_w, sheet_h):
-    path = "model/trained_policy.pt"
-    policy = AttentionPolicy(input_dim=2, d_model=128, num_heads=8, num_layers=2, sheet_width=sheet_w, sheet_height=sheet_h)
-    if os.path.exists(path):
-        ckpt = torch.load(path, map_location='cpu')
-        policy.load_state_dict(ckpt['model_state_dict'])
-    policy.eval()
-    return policy
-
-
-# Generate instance
-instance_pieces = generate_instance(num_pieces=num_pieces, sheet_width=sheet_w, sheet_height=sheet_h, seed=rand_seed)
+SHAPE_LIBRARY = {
+    "Rectangle": lambda w, h: Polygon([(0, 0), (w, 0), (w, h), (0, h)]),
+    "L-Shape": lambda w, h: Polygon([(0, 0), (w, 0), (w, h*0.4), (w*0.4, h*0.4), (w*0.4, h), (0, h)]),
+    "Triangle": lambda w, h: Polygon([(0, 0), (w, 0), (w*0.5, h)]),
+    "T-Shape": lambda w, h: Polygon([(0, h*0.6), (w, h*0.6), (w, h), (w*0.65, h), (w*0.65, 0), (w*0.35, 0), (w*0.35, h), (0, h)]),
+    "Trapezoid": lambda w, h: Polygon([(0, 0), (w, 0), (w*0.7, h), (w*0.3, h)])
+}
 
 
 # ---------------------------------------------------------
-# Helper Plotter Function
+# Sidebar: Stock Sheet Configuration
 # ---------------------------------------------------------
-def render_layout_plot(env, title_str, accent_color='darkblue'):
-    fig, ax = plt.subplots(figsize=(6, 6))
-    ax.add_patch(patches.Rectangle((0, 0), env.sheet_width, env.sheet_height, linewidth=2, edgecolor='black', facecolor='#f8f9fa'))
+st.sidebar.header("📐 1. Metal Sheet Stock Size")
+sheet_width = st.sidebar.number_input("Sheet Width (mm)", min_value=50.0, max_value=500.0, value=100.0, step=10.0)
+sheet_height = st.sidebar.number_input("Sheet Height (mm)", min_value=50.0, max_value=500.0, value=100.0, step=10.0)
 
-    colors = plt.cm.tab20(np.linspace(0, 1, env.num_pieces))
-
-    for idx, (x, y, w, h) in enumerate(env.placed_rects):
-        orig_idx = env.placed_indices[idx]
-        color = colors[orig_idx % len(colors)]
-
-        rect = patches.Rectangle((x, y), w, h, linewidth=1.5, edgecolor=accent_color, facecolor=color, alpha=0.85)
-        ax.add_patch(rect)
-
-        cx, cy = x + w / 2.0, y + h / 2.0
-        ax.text(cx, cy, f"P{orig_idx}\n{w:.1f}x{h:.1f}", color='white', weight='bold', fontsize=8, ha='center', va='center')
-
-    ax.set_xlim(-5, env.sheet_width + 5)
-    ax.set_ylim(-5, env.sheet_height + 5)
-    ax.set_aspect('equal')
-    ax.set_title(title_str, fontweight='bold', fontsize=10)
-    ax.set_xlabel("X (Sheet Width)")
-    ax.set_ylabel("Y (Sheet Height)")
-    ax.grid(True, linestyle='--', alpha=0.5)
-
-    plt.tight_layout()
-    return fig
+st.sidebar.divider()
+st.sidebar.header("⚙️ 2. Nesting Options")
+allow_rotation = st.sidebar.checkbox("Allow 90° Piece Rotation", value=True)
+grid_granularity = st.sidebar.slider("Placement Grid Step (mm)", min_value=1.0, max_value=5.0, value=2.0, step=0.5)
 
 
 # ---------------------------------------------------------
-# Execution & View Render
+# Main UI: Parts Inventory Input
 # ---------------------------------------------------------
-env = NestingEnv(sheet_width=sheet_w, sheet_height=sheet_h, num_pieces=num_pieces)
+st.subheader("📦 2. Parts Inventory to Cut")
 
-t0 = time.time()
+col_left, col_right = st.columns([2, 1])
 
-if selected_mode == "Trained Scaled AI Policy (N=20, Rollout Baseline)":
-    policy = load_scaled_model(sheet_w, sheet_h)
-    inst_tensor = torch.tensor(instance_pieces[np.newaxis, :, :], dtype=torch.float32)
-    with torch.no_grad():
-        actions, _, _ = policy(inst_tensor, decode_type="greedy")
-        seq = actions[0].cpu().numpy()
+with col_right:
+    st.markdown("### 🎲 Preset Inventory")
+    if st.button("Generate Sample Factory Order"):
+        st.session_state["parts_df"] = pd.DataFrame([
+            {"Part ID": "P1", "Shape": "Rectangle", "Width (mm)": 38.5, "Height (mm)": 39.1, "Quantity": 1},
+            {"Part ID": "P2", "Shape": "L-Shape", "Width (mm)": 32.0, "Height (mm)": 35.0, "Quantity": 1},
+            {"Part ID": "P3", "Shape": "Triangle", "Width (mm)": 36.0, "Height (mm)": 25.7, "Quantity": 1},
+            {"Part ID": "P4", "Shape": "Rectangle", "Width (mm)": 28.0, "Height (mm)": 23.0, "Quantity": 2},
+            {"Part ID": "P5", "Shape": "T-Shape", "Width (mm)": 31.2, "Height (mm)": 28.7, "Quantity": 1},
+            {"Part ID": "P6", "Shape": "Trapezoid", "Width (mm)": 25.0, "Height (mm)": 20.0, "Quantity": 1},
+            {"Part ID": "P7", "Shape": "Rectangle", "Width (mm)": 21.2, "Height (mm)": 15.6, "Quantity": 2},
+        ])
 
-    state = env.reset(pieces=instance_pieces)
-    for act in seq:
-        state, reward, done, _ = env.step(act)
-    latency_ms = (time.time() - t0) * 1000.0
-    utilization = env.score()
-    mode_name = "Trained Scaled AI Policy"
+if "parts_df" not in st.session_state:
+    st.session_state["parts_df"] = pd.DataFrame([
+        {"Part ID": "Part_1", "Shape": "Rectangle", "Width (mm)": 35.0, "Height (mm)": 25.0, "Quantity": 2},
+        {"Part ID": "Part_2", "Shape": "L-Shape", "Width (mm)": 30.0, "Height (mm)": 30.0, "Quantity": 2},
+        {"Part ID": "Part_3", "Shape": "Triangle", "Width (mm)": 28.0, "Height (mm)": 20.0, "Quantity": 2},
+        {"Part ID": "Part_4", "Shape": "Rectangle", "Width (mm)": 20.0, "Height (mm)": 15.0, "Quantity": 3},
+    ])
 
-elif selected_mode == "Trained Standard AI Policy (N=10)":
-    policy = load_standard_model(sheet_w, sheet_h)
-    inst_tensor = torch.tensor(instance_pieces[np.newaxis, :, :], dtype=torch.float32)
-    with torch.no_grad():
-        actions, _, _ = policy(inst_tensor, decode_type="greedy")
-        seq = actions[0].cpu().numpy()
-
-    state = env.reset(pieces=instance_pieces)
-    for act in seq:
-        state, reward, done, _ = env.step(act)
-    latency_ms = (time.time() - t0) * 1000.0
-    utilization = env.score()
-    mode_name = "Trained Standard AI Policy"
-
-elif selected_mode == "Largest-Piece-First Heuristic":
-    utilization, _ = run_largest_first_heuristic(env, instance_pieces)
-    latency_ms = (time.time() - t0) * 1000.0
-    mode_name = "Largest-Piece-First Heuristic"
-
-elif selected_mode == "Random Placement Policy":
-    state = env.reset(pieces=instance_pieces)
-    np.random.seed(rand_seed)
-    done = False
-    while not done:
-        avail = np.where(state["mask"])[0]
-        act = int(np.random.choice(avail))
-        state, reward, done, _ = env.step(act)
-    utilization = env.score()
-    latency_ms = (time.time() - t0) * 1000.0
-    mode_name = "Random Policy"
-
-elif selected_mode == "90° Rotation Action Space Policy":
-    rot_env = RotationNestingEnv(sheet_width=sheet_w, sheet_height=sheet_h, num_pieces=num_pieces)
-    policy = RotationAttentionPolicy(input_dim=2, d_model=128, num_heads=8, num_layers=2, sheet_width=sheet_w, sheet_height=sheet_h)
-    policy.eval()
-
-    inst_tensor = torch.tensor(instance_pieces[np.newaxis, :, :], dtype=torch.float32)
-    with torch.no_grad():
-        actions, _ = policy(inst_tensor, decode_type="greedy")
-        seq = actions[0].cpu().numpy()
-
-    state = rot_env.reset(pieces=instance_pieces)
-    for act in seq:
-        state, reward, done, _ = rot_env.step(act)
-    utilization = rot_env.score()
-    latency_ms = (time.time() - t0) * 1000.0
-    env = rot_env
-    mode_name = "90° Rotation Policy"
-
-elif selected_mode == "Shapely Irregular Polygon Nesting":
-    poly_env = PolygonNestingEnv(sheet_width=sheet_w, sheet_height=sheet_h, num_pieces=num_pieces)
-    polys = generate_polygon_instance(num_pieces=num_pieces, seed=rand_seed)
-
-    areas = [p.area for p in polys]
-    sorted_idx = np.argsort(-np.array(areas))
-
-    state = poly_env.reset(polygons=polys)
-    for act in sorted_idx:
-        state, reward, done, _ = poly_env.step(act)
-
-    utilization = poly_env.score()
-    latency_ms = (time.time() - t0) * 1000.0
-
-    # Custom Shapely Plot
-    fig_poly, ax_p = plt.subplots(figsize=(6, 6))
-    ax_p.add_patch(patches.Rectangle((0, 0), sheet_w, sheet_h, linewidth=2, edgecolor='black', facecolor='#f8f9fa'))
-    colors = plt.cm.Set3(np.linspace(0, 1, num_pieces))
-
-    for idx, poly in enumerate(poly_env.placed_polygons):
-        orig_idx = poly_env.placed_indices[idx]
-        color = colors[idx % len(colors)]
-        x_coords, y_coords = poly.exterior.xy
-        patch = patches.Polygon(list(zip(x_coords, y_coords)), closed=True, linewidth=1.5, edgecolor='darkgreen', facecolor=color, alpha=0.85)
-        ax_p.add_patch(patch)
-        ax_p.text(poly.centroid.x, poly.centroid.y, f"P{orig_idx}", color='black', weight='bold', fontsize=8, ha='center', va='center')
-
-    ax_p.set_xlim(-5, sheet_w + 5)
-    ax_p.set_ylim(-5, sheet_h + 5)
-    ax_p.set_aspect('equal')
-    ax_p.set_title(f"Shapely Irregular Polygons | Util: {utilization:.2f}%", fontweight='bold', fontsize=10)
-    ax_p.grid(True, linestyle='--', alpha=0.5)
-
-    mode_name = "Shapely Irregular Polygon Nesting"
-
-
-# ---------------------------------------------------------
-# Display Key Metrics Cards
-# ---------------------------------------------------------
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Sheet Utilization", f"{utilization:.2f}%")
-col2.metric("Pieces Placed", f"{len(getattr(env, 'placed_rects', getattr(env, 'placed_polygons', [])))} / {num_pieces}")
-col3.metric("Inference Latency", f"{latency_ms:.2f} ms")
-col4.metric("Active Model Mode", mode_name)
-
+with col_left:
+    st.markdown("### 📝 Edit Part Order List")
+    edited_df = st.data_editor(
+        st.session_state["parts_df"],
+        num_rows="dynamic",
+        use_container_width=True,
+        column_config={
+            "Shape": st.column_config.SelectboxColumn("Shape Type", options=list(SHAPE_LIBRARY.keys()), required=True),
+            "Width (mm)": st.column_config.NumberColumn("Width (mm)", min_value=5.0, max_value=200.0, default=20.0),
+            "Height (mm)": st.column_config.NumberColumn("Height (mm)", min_value=5.0, max_value=200.0, default=20.0),
+            "Quantity": st.column_config.NumberColumn("Quantity", min_value=1, max_value=10, default=1)
+        }
+    )
 
 st.divider()
 
 # ---------------------------------------------------------
-# Display Layout Visualizations
+# Run AI Nesting Engine Button
 # ---------------------------------------------------------
-if enable_side_by_side and selected_mode != "Shapely Irregular Polygon Nesting":
-    col_left, col_right = st.columns(2)
+if st.button("⚡ EXECUTE AI NESTING ENGINE"):
+    st.markdown("---")
+    
+    # 1. Expand dataframe rows based on Quantity into individual Shapely Polygon items
+    expanded_items = []
+    for idx, row in edited_df.iterrows():
+        name = str(row["Part ID"])
+        shape_type = str(row["Shape"])
+        w = float(row["Width (mm)"])
+        h = float(row["Height (mm)"])
+        qty = int(row["Quantity"])
 
-    with col_left:
-        st.subheader(f"🎯 Selected Strategy: {mode_name}")
-        fig_selected = render_layout_plot(env, f"{mode_name}\nUtilization: {utilization:.2f}%")
-        st.pyplot(fig_selected)
+        polygon_fn = SHAPE_LIBRARY.get(shape_type, SHAPE_LIBRARY["Rectangle"])
 
-    with col_right:
-        st.subheader("📏 Classical Heuristic (Largest-First)")
-        env_h = NestingEnv(sheet_width=sheet_w, sheet_height=sheet_h, num_pieces=num_pieces)
-        util_h, _ = run_largest_first_heuristic(env_h, instance_pieces)
-        fig_h = render_layout_plot(env_h, f"Largest-Piece-First Heuristic\nUtilization: {util_h:.2f}%", accent_color='darkorange')
-        st.pyplot(fig_h)
+        for q in range(qty):
+            poly = polygon_fn(w, h)
+            expanded_items.append({
+                "id": f"{name}_{q+1}" if qty > 1 else name,
+                "shape": shape_type,
+                "width": w,
+                "height": h,
+                "polygon": poly,
+                "area": poly.area
+            })
 
-        diff = utilization - util_h
-        if diff > 0:
-            st.success(f"🚀 AI Strategy beats Largest-First Heuristic by **+{diff:.2f}%**!")
-        elif diff < 0:
-            st.warning(f"Largest-First Heuristic beats selected mode by **+{abs(diff):.2f}%**.")
+    num_items = len(expanded_items)
+    if num_items == 0:
+        st.error("Please add at least 1 part to the order list!")
+        st.stop()
+
+    t_start = time.time()
+
+    # 2. AI Attention Policy Neural Ordering
+    # Pass piece bounding boxes [w, h] to Rotation-Aware Attention Policy
+    piece_features_np = np.array([[item["width"], item["height"]] for item in expanded_items], dtype=np.float32)
+    
+    policy = RotationAttentionPolicy(
+        input_dim=2,
+        d_model=128,
+        num_heads=8,
+        num_layers=2,
+        sheet_width=sheet_width,
+        sheet_height=sheet_height
+    )
+    # Load trained policy checkpoint if available
+    ckpt_path = "model/scaled_policy.pt"
+    if os.path.exists(ckpt_path):
+        ckpt = torch.load(ckpt_path, map_location='cpu')
+        # Load matched encoder/decoder weights safely
+        policy.load_state_dict(ckpt['model_state_dict'], strict=False)
+    policy.eval()
+
+    # Neural Forward Pass in greedy mode
+    batch_t = torch.tensor(piece_features_np[np.newaxis, :, :], dtype=torch.float32)
+    with torch.no_grad():
+        actions_t, _ = policy(batch_t, decode_type="greedy")
+        ai_action_sequence = actions_t[0].cpu().numpy()
+
+    # 3. Geometry Placement Engine (Shapely + Bottom-Left Search)
+    sheet_poly = box(0, 0, sheet_width, sheet_height)
+    sheet_area = sheet_width * sheet_height
+
+    placed_polygons = []
+    placement_manifest = []
+    used_mask = np.ones(2 * num_items, dtype=bool)
+
+    for action_val in ai_action_sequence:
+        piece_idx = int(action_val % num_items)
+        is_rotated = bool(action_val >= num_items) if allow_rotation else False
+
+        if not used_mask[piece_idx]:
+            continue  # Already placed
+
+        item = expanded_items[piece_idx]
+        poly = item["polygon"]
+
+        # Rotate polygon 90° if selected by policy
+        if is_rotated:
+            poly = shapely.affinity.rotate(poly, 90, origin=(0, 0))
+
+        # Search bottom-left position on sheet grid
+        minx, miny, maxx, maxy = poly.bounds
+        p_w, p_h = maxx - minx, maxy - miny
+
+        xs = np.arange(0.0, sheet_width - p_w + 0.5, grid_granularity)
+        ys = np.arange(0.0, sheet_height - p_h + 0.5, grid_granularity)
+
+        placed_loc = None
+        for y in ys:
+            for x in xs:
+                shifted = translate(poly, xoff=x - minx, yoff=y - miny)
+                if not sheet_poly.contains(shifted):
+                    continue
+
+                overlap = any(shifted.intersects(p) and not shifted.touches(p) for p in placed_polygons)
+                if not overlap:
+                    placed_loc = (x, y, shifted)
+                    break
+            if placed_loc is not None:
+                break
+
+        # Update placement state
+        used_mask[piece_idx] = False
+        used_mask[piece_idx + num_items] = False
+
+        if placed_loc is not None:
+            px, py, final_poly = placed_loc
+            placed_polygons.append(final_poly)
+            placement_manifest.append({
+                "Part ID": item["id"],
+                "Shape": item["shape"],
+                "Placed": "YES",
+                "Position (X, Y)": f"({px:.1f}, {py:.1f})",
+                "Orientation": "90° Rotated" if is_rotated else "0° Normal",
+                "Area (mm²)": f"{item['area']:.1f}"
+            })
         else:
-            st.info("Both strategies produced identical utilization scores.")
-else:
-    st.subheader(f"Layout View: {mode_name}")
-    if selected_mode == "Shapely Irregular Polygon Nesting":
-        st.pyplot(fig_poly)
-    else:
-        fig_single = render_layout_plot(env, f"{mode_name}\nUtilization: {utilization:.2f}%")
-        st.pyplot(fig_single)
+            placement_manifest.append({
+                "Part ID": item["id"],
+                "Shape": item["shape"],
+                "Placed": "NO (Sheet Full)",
+                "Position (X, Y)": "-",
+                "Orientation": "-",
+                "Area (mm²)": f"{item['area']:.1f}"
+            })
 
-st.divider()
+    nest_latency_ms = (time.time() - t_start) * 1000.0
 
-# ---------------------------------------------------------
-# Piece Dimension Table
-# ---------------------------------------------------------
-with st.expander("📊 View Generated Piece Dimensions Table"):
-    if selected_mode != "Shapely Irregular Polygon Nesting":
-        st.dataframe(
-            [{"Piece Index": i, "Width": f"{w:.2f}", "Height": f"{h:.2f}", "Area": f"{w*h:.2f}"} for i, (w, h) in enumerate(instance_pieces)],
-            use_container_width=True
-        )
-    else:
-        st.write("Irregular polygon templates generated: L-Shapes, Triangles, T-Shapes, Trapezoids, Rectangles.")
+    total_placed_area = sum(p.area for p in placed_polygons)
+    utilization_pct = (total_placed_area / sheet_area) * 100.0
+    scrap_pct = 100.0 - utilization_pct
+    placed_count = len(placed_polygons)
+
+    # 4. Display Metric Cards
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Sheet Utilization", f"{utilization_pct:.2f}%")
+    m2.metric("Scrap Material Ratio", f"{scrap_pct:.2f}%")
+    m3.metric("Parts Placed", f"{placed_count} / {num_items}")
+    m4.metric("AI Execution Speed", f"{nest_latency_ms:.2f} ms")
+
+    st.divider()
+
+    # 5. Render High-Resolution Nesting Visualizer Plot
+    col_plot, col_table = st.columns([1.3, 1])
+
+    with col_plot:
+        st.subheader("🖼️ Nested Sheet Metal Layout")
+        fig, ax = plt.subplots(figsize=(8, 8))
+
+        # Sheet background
+        ax.add_patch(patches.Rectangle((0, 0), sheet_width, sheet_height, linewidth=2, edgecolor='black', facecolor='#F1F5F9'))
+
+        colors = plt.cm.tab20(np.linspace(0, 1, num_items))
+
+        for idx, manifest_item in enumerate([m for m in placement_manifest if m["Placed"] == "YES"]):
+            poly = placed_polygons[idx]
+            color = colors[idx % len(colors)]
+            is_rot = "90°" in manifest_item["Orientation"]
+            edge_c = '#DC2626' if is_rot else '#1E3A8A'
+
+            x_coords, y_coords = poly.exterior.xy
+            patch = patches.Polygon(list(zip(x_coords, y_coords)), closed=True, linewidth=1.8, edgecolor=edge_c, facecolor=color, alpha=0.85)
+            ax.add_patch(patch)
+
+            cx, cy = poly.centroid.x, poly.centroid.y
+            ax.text(cx, cy, f"{manifest_item['Part ID']}\n{manifest_item['Shape']}", color='white', weight='bold', fontsize=8, ha='center', va='center')
+
+        ax.set_xlim(-5, sheet_width + 5)
+        ax.set_ylim(-5, sheet_height + 5)
+        ax.set_aspect('equal')
+        ax.set_title(f"AI Nested Sheet Metal Layout\nUtilization: {utilization_pct:.2f}% | Placed: {placed_count}/{num_items} Parts | Red Edges = 90° Rotated", fontsize=11, fontweight='bold')
+        ax.set_xlabel("Width (mm)")
+        ax.set_ylabel("Height (mm)")
+        ax.grid(True, linestyle='--', alpha=0.5)
+
+        plt.tight_layout()
+        st.pyplot(fig)
+
+    with col_right_table := col_table:
+        st.subheader("📋 Part Placement Manifest Table")
+        st.dataframe(pd.DataFrame(placement_manifest), use_container_width=True, hide_index=True)
