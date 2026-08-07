@@ -1,12 +1,10 @@
-"""
-Industrial Beast-Mode Neural Combinatorial Optimization Trainer (`beast_trainer.py`)
-
-Implementation of Kool et al. (2019) Attention Model with Greedy Rollout Baseline
-trained on large-scale variable piece counts (N=10 to N=50) over 3,000 steps.
-"""
-
 import os
+import sys
 import time
+
+# Ensure project root is in sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 import numpy as np
 import torch
 import torch.optim as optim
