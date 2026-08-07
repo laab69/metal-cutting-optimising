@@ -113,7 +113,7 @@ def train_beast_policy(
         batch_pieces_t = torch.tensor(batch_pieces_np, dtype=torch.float32)
 
         # Candidate sampling rollout
-        candidate_actions, candidate_log_probs = policy(batch_pieces_t, decode_type="sampling")
+        candidate_actions, candidate_log_probs = policy(batch_pieces_t, decode_type="sample")
 
         # Rollout rewards for candidate
         candidate_rewards = []

@@ -110,7 +110,7 @@ class RotationAttentionPolicy(nn.Module):
         for step in range(num_pieces):
             probs = self.decoder(h, h_mean, last_placed_embed, mask)
 
-            if decode_type == "sample":
+            if decode_type in ["sample", "sampling"]:
                 dist = torch.distributions.Categorical(probs)
                 action = dist.sample()
                 log_prob = dist.log_prob(action)
