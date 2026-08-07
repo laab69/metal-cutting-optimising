@@ -153,6 +153,10 @@ def train_beast_policy(
 
         history_loss.append(loss.item())
 
+        # Real-time per-step progress streaming
+        if it % 5 == 0 or it == 1:
+            print(f"Step [{it:4d}/{num_iterations}] | Loss: {loss.item():.4f} | Batch Avg Utilization: {candidate_rewards_t.mean():.2f}% | N={N}", flush=True)
+
         # Evaluate and test baseline update
         if it % eval_freq == 0:
             cand_score = evaluate_policy_on_dataset(policy, eval_instances)
@@ -178,7 +182,7 @@ def train_beast_policy(
                 updated = True
 
             elapsed_min = (time.time() - start_time) / 60.0
-            print(f"Step [{it:4d}/{num_iterations}] | Candidate: {cand_score:.2f}% | Baseline: {base_score:.2f}% | p-val: {p_val:.4f} | Updated: {updated} | Time: {elapsed_min:.1f}m")
+            print(f"--- BENCHMARK EVAL Step [{it:4d}/{num_iterations}] | Candidate: {cand_score:.2f}% | Baseline: {base_score:.2f}% | p-val: {p_val:.4f} | Updated: {updated} | Time: {elapsed_min:.1f}m ---", flush=True)
 
         # Save Checkpoint
         if it % checkpoint_freq == 0 or it == num_iterations:
