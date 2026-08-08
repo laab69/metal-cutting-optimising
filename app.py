@@ -431,8 +431,8 @@ if st.button("⚡ EXECUTE MULTI-ANGLE AI NESTING ENGINE"):
                     dist_from_center = abs(x - (sheet_width - p_w)/2.0) + abs(y - (sheet_height - p_h)/2.0)
                     grid_candidates.append((dist_from_center, x, y))
 
-            # Prioritize bottom-left and edge contacts
-            grid_candidates.sort(key=lambda c_item: (c_item[2], c_item[1]))
+            # Prioritize outer corners & perimeter (leaving central cavity for angled/rotated interlocking parts)
+            grid_candidates.sort(key=lambda c_item: -c_item[0])
 
             for _, x, y in grid_candidates:
                 shifted = translate(rot_poly, xoff=x - minx, yoff=y - miny)
