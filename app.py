@@ -3,8 +3,8 @@ Industrial Sheet Metal Nesting AI — Final Production App (`app.py`)
 
 Production-Ready UI supporting:
 1. Sheet Stock Dimensions (Width, Height).
-2. Interactive Mouse Canvas Polygon Drawer (`streamlit-drawable-canvas`).
-3. Preset Puzzles: 5 Unit Squares in 2.8x2.8 Sheet, Factory Order, Custom Drawn Shapes.
+2. Interactive Custom Polygon Builder (Vertex Editor, Presets & Live Visual Canvas).
+3. Preset Puzzles: 5 Unit Squares in 2.8x2.8 Sheet, Factory Order, Custom Shapes.
 4. Multi-Angle AI Nesting Engine (0°, 45°, 90°, 135° Rotations + Shapely 2D Geometry).
 5. High-Res Layout Plot, Utilization %, Scrap Ratio, and Placement Manifest.
 """
@@ -20,7 +20,7 @@ import streamlit as st
 import shapely
 from shapely.geometry import Polygon, box
 from shapely.affinity import translate, rotate
-from streamlit_drawable_canvas import st_canvas
+import shapely.validation
 
 from extensions.rotation_policy import RotationAttentionPolicy
 
@@ -44,11 +44,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-header">🔩 Industrial Sheet Metal Nesting AI</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Multi-Angle Attention Policy + Interactive Mouse Polygon Drawer & Shapely Geometry</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Multi-Angle Attention Policy + Interactive Custom Polygon Builder & 2D Geometry Engine</div>', unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------
-# Shapely Polygon Shape Library & Parser
+# Shapely Polygon Shape Library & Robust Polygon Builder
 # ---------------------------------------------------------
 SHAPE_LIBRARY = {
     "Square / Rectangle": lambda w, h: Polygon([(0, 0), (w, 0), (w, h), (0, h)]),
@@ -58,18 +58,34 @@ SHAPE_LIBRARY = {
     "Trapezoid": lambda w, h: Polygon([(0, 0), (w, 0), (w*0.7, h), (w*0.3, h)])
 }
 
+def clean_and_build_polygon(coords: list) -> Polygon:
+    """
+    Builds a robust, non-self-intersecting 2D Polygon from any coordinate list.
+    Automatically repairs self-intersections or duplicate vertex points.
+    """
+    if len(coords) < 3:
+        return Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
+    
+    try:
+        poly = Polygon(coords)
+        if not poly.is_valid:
+            poly = shapely.make_valid(poly)
+            if hasattr(poly, 'geoms'):
+                poly = max(poly.geoms, key=lambda g: g.area)
+        return poly
+    except Exception:
+        # Fallback to convex hull if coordinates have duplicate lines
+        pts = shapely.geometry.MultiPoint(coords)
+        return pts.convex_hull
+
 def parse_vertices_string(vert_str: str) -> Polygon:
     try:
         cleaned = vert_str.replace("(", "").replace(")", "").replace("[", "").replace("]", "")
         nums = [float(val.strip()) for val in cleaned.split(",") if val.strip()]
         coords = [(nums[i], nums[i+1]) for i in range(0, len(nums), 2)]
-        if len(coords) >= 3:
-            poly = Polygon(coords)
-            if poly.is_valid:
-                return poly
+        return clean_and_build_polygon(coords)
     except Exception:
-        pass
-    return Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
+        return Polygon([(0, 0), (25, 0), (25, 25), (0, 25)])
 
 
 # ---------------------------------------------------------
@@ -104,11 +120,11 @@ if len(candidate_angles) == 0:
 
 
 # ---------------------------------------------------------
-# Main UI: Parts Inventory & Mouse Polygon Drawer
+# Main UI: Parts Inventory & Custom Polygon Builder
 # ---------------------------------------------------------
-st.subheader("📦 2. Parts Inventory & Mouse Polygon Canvas Drawer")
+st.subheader("📦 2. Parts Inventory & Custom Polygon Builder")
 
-tab1, tab2, tab3 = st.tabs(["📝 Standard Parts Table & Presets", "🖱️ Draw Custom Polygon with Mouse", "✏️ Coordinate & Preset Designer"])
+tab1, tab2 = st.tabs(["📝 Standard Parts Table & Presets", "✏️ Interactive Custom Polygon Designer"])
 
 with tab1:
     col_btn1, col_btn2 = st.columns(2)
@@ -160,134 +176,77 @@ with tab1:
     )
 
 with tab2:
-    st.markdown("### 🖱️ Mouse Canvas Polygon Drawer")
-    st.caption("Click and drag your mouse directly on the white canvas below to draw your custom shape!")
+    st.markdown("### ✏️ Custom 2D Polygon Designer & Geometry Visualizer")
+    st.caption("Visually design any custom polygon with coordinate points, sliders, or instant presets!")
 
-    col_canvas, col_mouse_info = st.columns([1.3, 1])
+    col_presets, col_vertices, col_preview = st.columns([1, 1.2, 1.3])
 
-    with col_canvas:
-        drawing_mode = st.radio("Mouse Tool Mode:", ("freedraw", "polygon", "rect"), horizontal=True)
-
-        canvas_result = st_canvas(
-            fill_color="rgba(59, 130, 246, 0.4)",
-            stroke_width=3,
-            stroke_color="#0F172A",
-            background_color="#FFFFFF",
-            height=350,
-            width=450,
-            drawing_mode=drawing_mode,
-            update_streamlit=True,
-            key="mouse_canvas_drawing",
+    with col_presets:
+        st.markdown("#### 1. Choose Shape Preset")
+        preset_type = st.selectbox(
+            "Load Base Template:",
+            ["Custom L-Bracket", "Notched Plate", "Gusset Triangle", "Hexagonal Flange", "U-Channel / C-Plate", "Freeform Coordinate Points"]
         )
 
-    with col_mouse_info:
-        st.markdown("### 📋 Mouse Shape Status")
-        mouse_part_id = st.text_input("Custom Mouse Part ID", value="Mouse_Drawn_Part_1")
-        mouse_qty = st.number_input("Quantity to Add to Order", min_value=1, max_value=10, value=2)
+        part_name_input = st.text_input("Custom Part ID:", value="Custom_Part_1")
+        part_qty_input = st.number_input("Quantity:", min_value=1, max_value=10, value=2)
 
-        coords_str = ""
-        extracted_coords = []
+    with col_vertices:
+        st.markdown("#### 2. Edit Vertex Coordinates (X, Y)")
+        
+        default_pts_str = "(0,0), (40,0), (40,15), (15,15), (15,40), (0,40)"
+        if preset_type == "Notched Plate":
+            default_pts_str = "(0,0), (50,0), (50,30), (35,30), (35,20), (15,20), (15,30), (0,30)"
+        elif preset_type == "Gusset Triangle":
+            default_pts_str = "(0,0), (45,0), (22.5,35)"
+        elif preset_type == "Hexagonal Flange":
+            default_pts_str = "(10,0), (30,0), (40,17.3), (30,34.6), (10,34.6), (0,17.3)"
+        elif preset_type == "U-Channel / C-Plate":
+            default_pts_str = "(0,0), (40,0), (40,30), (30,30), (30,12), (10,12), (10,30), (0,30)"
 
-        if canvas_result.json_data is not None:
-            objects = canvas_result.json_data.get("objects", [])
-            if len(objects) > 0:
-                last_obj = objects[-1]
-                obj_type = last_obj.get("type")
-
-                if obj_type == "path":
-                    path_data = last_obj.get("path", [])
-                    for p in path_data:
-                        if len(p) >= 3 and p[0] in ["M", "L", "Q", "C"]:
-                            extracted_coords.append((round(float(p[1]) / 10.0, 1), round((350.0 - float(p[2])) / 10.0, 1)))
-
-                elif obj_type == "polygon":
-                    points = last_obj.get("points", [])
-                    for pt in points:
-                        extracted_coords.append((round(float(pt["x"]) / 10.0, 1), round((350.0 - float(pt["y"])) / 10.0, 1)))
-
-                elif obj_type == "rect":
-                    left = round(float(last_obj.get("left", 0)) / 10.0, 1)
-                    top = round((350.0 - float(last_obj.get("top", 0))) / 10.0, 1)
-                    rw = round(float(last_obj.get("width", 20)) / 10.0, 1)
-                    rh = round(float(last_obj.get("height", 20)) / 10.0, 1)
-                    extracted_coords = [
-                        (left, top - rh),
-                        (left + rw, top - rh),
-                        (left + rw, top),
-                        (left, top)
-                    ]
-
-        if len(extracted_coords) >= 3:
-            coords_str = ", ".join([f"({x},{y})" for x, y in extracted_coords])
-            st.success(f"Detected {len(extracted_coords)} Vertices from Mouse Drawing!")
-            st.code(coords_str, language="text")
-
-            if st.button("➕ Add Mouse Drawn Polygon to Order List"):
-                new_row = pd.DataFrame([{
-                    "Part ID": mouse_part_id,
-                    "Shape": "Custom Drawn Polygon",
-                    "Width (mm)": 30.0,
-                    "Height (mm)": 30.0,
-                    "Quantity": mouse_qty,
-                    "Custom Vertices": coords_str
-                }])
-                st.session_state["parts_df"] = pd.concat([edited_df, new_row], ignore_index=True)
-                st.success(f"Added Mouse Drawn Polygon '{mouse_part_id}' to order inventory!")
-                st.rerun()
-        else:
-            st.info("Draw a shape on the left white canvas box with your mouse!")
-
-with tab3:
-    st.markdown("### ✏️ Coordinate & Preset Designer")
-    col_designer, col_live_prev = st.columns([1.1, 1])
-
-    with col_designer:
-        preset_choice = st.selectbox(
-            "Quick Load Custom Polygon Preset:",
-            ["Custom (Manual Points)", "L-Bracket Plate", "Notched Rectangle", "Triangle Gusset", "Regular Hexagon"]
+        vert_text_input = st.text_area(
+            "Perimeter Points (X, Y):",
+            value=default_pts_str,
+            height=110,
+            help="Enter coordinate points (x, y) along the perimeter of your shape."
         )
 
-        default_points = "(0,0), (35,0), (35,12), (15,12), (15,28), (0,28)"
-        if preset_choice == "L-Bracket Plate":
-            default_points = "(0,0), (40,0), (40,15), (15,15), (15,40), (0,40)"
-        elif preset_choice == "Notched Rectangle":
-            default_points = "(0,0), (50,0), (50,30), (35,30), (35,20), (15,20), (15,30), (0,30)"
-        elif preset_choice == "Triangle Gusset":
-            default_points = "(0,0), (45,0), (22.5,35)"
-        elif preset_choice == "Regular Hexagon":
-            default_points = "(10,0), (30,0), (40,17.3), (30,34.6), (10,34.6), (0,17.3)"
+    with col_preview:
+        st.markdown("#### 3. Real-Time Geometry Preview")
+        preview_polygon = parse_vertices_string(vert_text_input)
 
-        custom_vert_text = st.text_area("Vertex Coordinates (X, Y):", value=default_points, height=100)
-        custom_shape_name = st.text_input("Part Name:", value="Custom_Plate_1", key="t3_name")
-        custom_shape_qty = st.number_input("Quantity:", min_value=1, max_value=10, value=2, key="t3_qty")
-
-    with col_live_prev:
-        st.markdown("#### Live Geometry Preview")
-        preview_polygon = parse_vertices_string(custom_vert_text)
-
-        fig_prev, ax_prev = plt.subplots(figsize=(4.5, 4))
+        fig_prev, ax_prev = plt.subplots(figsize=(4.5, 3.8))
         if preview_polygon is not None and preview_polygon.is_valid:
             x_c, y_c = preview_polygon.exterior.xy
-            ax_prev.fill(x_c, y_c, color='#3B82F6', alpha=0.7, edgecolor='#1E3A8A', linewidth=2)
-            ax_prev.scatter(x_c, y_c, color='#DC2626', zorder=5, s=40)
-            ax_prev.set_title(f"Area: {preview_polygon.area:.1f} mm²", fontsize=10, fontweight='bold')
+            ax_prev.fill(x_c, y_c, color='#3B82F6', alpha=0.75, edgecolor='#1E3A8A', linewidth=2.5)
+            ax_prev.scatter(x_c, y_c, color='#DC2626', zorder=5, s=50)
+
+            for i, (x, y) in enumerate(zip(x_c[:-1], y_c[:-1])):
+                ax_prev.text(x, y, f" P{i+1}\n({x:.1f},{y:.1f})", fontsize=7.5, fontweight='bold')
+
+            minx, miny, maxx, maxy = preview_polygon.bounds
+            p_w, p_h = maxx - minx, maxy - miny
+            ax_prev.set_title(f"{part_name_input}\nWidth: {p_w:.1f} mm | Height: {p_h:.1f} mm | Area: {preview_polygon.area:.1f} mm²", fontsize=9.5, fontweight='bold')
+        else:
+            ax_prev.text(0.5, 0.5, "Invalid Polygon Points", ha='center', va='center')
+
         ax_prev.set_aspect('equal')
         ax_prev.grid(True, linestyle='--', alpha=0.5)
         st.pyplot(fig_prev)
 
-    if st.button("➕ Add Preset Polygon to Order List"):
+    if st.button("➕ Add This Custom Polygon to Order Inventory Table"):
         if preview_polygon is not None and preview_polygon.is_valid:
             minx, miny, maxx, maxy = preview_polygon.bounds
             new_row = pd.DataFrame([{
-                "Part ID": custom_shape_name,
+                "Part ID": part_name_input,
                 "Shape": "Custom Drawn Polygon",
                 "Width (mm)": round(maxx - minx, 1),
                 "Height (mm)": round(maxy - miny, 1),
-                "Quantity": custom_shape_qty,
-                "Custom Vertices": custom_vert_text
+                "Quantity": part_qty_input,
+                "Custom Vertices": vert_text_input
             }])
             st.session_state["parts_df"] = pd.concat([edited_df, new_row], ignore_index=True)
-            st.success(f"Added '{custom_shape_name}' ({custom_shape_qty}x) to order inventory!")
+            st.success(f"Added '{part_name_input}' ({part_qty_input}x) to order table!")
             st.rerun()
 
 st.divider()
@@ -353,7 +312,7 @@ if st.button("⚡ EXECUTE MULTI-ANGLE AI NESTING ENGINE"):
         actions_t, _ = policy(batch_t, decode_type="greedy")
         ai_sequence = actions_t[0].cpu().numpy()
 
-    # Geometry Placement Engine
+    # Geometry Placement Engine with Multi-Angle Support
     sheet_poly = box(0, 0, sheet_width, sheet_height)
     sheet_area = sheet_width * sheet_height
 
