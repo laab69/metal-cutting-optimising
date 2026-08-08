@@ -133,10 +133,10 @@ tab1, tab2, tab3 = st.tabs([
 ])
 
 with tab1:
-    col_btn1, col_btn2 = st.columns(2)
+    col_btn1, col_btn2, col_btn3 = st.columns(3)
 
     with col_btn1:
-        if st.button("🧩 Load 5 Unit Squares in 2.8x2.8 Sheet (Friedman Puzzle)"):
+        if st.button("🧩 5 Unit Squares in 2.8x2.8 (Friedman Puzzle)"):
             st.session_state["sheet_w_val"] = 2.8
             st.session_state["sheet_h_val"] = 2.8
             st.session_state["parts_df"] = pd.DataFrame([
@@ -149,7 +149,7 @@ with tab1:
             st.rerun()
 
     with col_btn2:
-        if st.button("🎲 Generate Sample Factory Order"):
+        if st.button("🎲 Standard Factory Order"):
             st.session_state["sheet_w_val"] = 100.0
             st.session_state["sheet_h_val"] = 100.0
             st.session_state["parts_df"] = pd.DataFrame([
@@ -158,6 +158,20 @@ with tab1:
                 {"Part ID": "P3", "Shape": "Triangle", "Width (mm)": 36.0, "Height (mm)": 25.7, "Quantity": 1, "Custom Vertices": ""},
                 {"Part ID": "P4", "Shape": "Square / Rectangle", "Width (mm)": 28.0, "Height (mm)": 23.0, "Quantity": 2, "Custom Vertices": ""},
                 {"Part ID": "P5", "Shape": "T-Shape", "Width (mm)": 31.2, "Height (mm)": 28.7, "Quantity": 1, "Custom Vertices": ""},
+            ])
+            st.rerun()
+
+    with col_btn3:
+        if st.button("🔥 Hard Non-Convex Benchmark (ESICUP / Trap)"):
+            st.session_state["sheet_w_val"] = 100.0
+            st.session_state["sheet_h_val"] = 100.0
+            st.session_state["parts_df"] = pd.DataFrame([
+                {"Part ID": "Long_Blocking_Bar", "Shape": "Square / Rectangle", "Width (mm)": 85.0, "Height (mm)": 16.0, "Quantity": 1, "Custom Vertices": ""},
+                {"Part ID": "Interlocking_L_Bracket", "Shape": "Custom Drawn Polygon", "Width (mm)": 45.0, "Height (mm)": 45.0, "Quantity": 2, "Custom Vertices": "(0,0), (45,0), (45,18), (18,18), (18,45), (0,45)"},
+                {"Part ID": "Notched_Plate", "Shape": "Custom Drawn Polygon", "Width (mm)": 50.0, "Height (mm)": 30.0, "Quantity": 1, "Custom Vertices": "(0,0), (50,0), (50,30), (35,30), (35,18), (15,18), (15,30), (0,30)"},
+                {"Part ID": "Gusset_Triangle", "Shape": "Custom Drawn Polygon", "Width (mm)": 42.0, "Height (mm)": 32.0, "Quantity": 2, "Custom Vertices": "(0,0), (42,0), (21,32)"},
+                {"Part ID": "T_Bar_Support", "Shape": "T-Shape", "Width (mm)": 32.0, "Height (mm)": 30.0, "Quantity": 1, "Custom Vertices": ""},
+                {"Part ID": "Corner_Filler_Block", "Shape": "Square / Rectangle", "Width (mm)": 18.0, "Height (mm)": 18.0, "Quantity": 2, "Custom Vertices": ""},
             ])
             st.rerun()
 
