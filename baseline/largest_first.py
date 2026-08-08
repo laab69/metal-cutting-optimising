@@ -18,31 +18,16 @@ from typing import Tuple, Dict, Any, List
 from env.nesting_env import NestingEnv
 
 
-def run_largest_first_heuristic(env: NestingEnv, pieces: np.ndarray) -> Tuple[float, List[Tuple[float, float, float, float]]]:
-    """
-    Runs the Largest-Piece-First heuristic on a specific problem instance.
-
-    Parameters:
-    -----------
-    env : NestingEnv
-        The nesting environment instance.
-    pieces : np.ndarray of shape (N, 2)
-        Array of piece [width, height].
-
-    Returns:
-    --------
-    (final_utilization_pct, list_of_placed_rectangles)
-    """
-    state = env.reset(pieces=pieces)
-    num_pieces = len(pieces)
-
-    # 1. Compute area for every piece: Area = width * height
+def largest_piece_first_sequence(pieces: np.ndarray) -> np.ndarray:
+    """Returns sorted piece indices in descending order of area."""
     areas = pieces[:, 0] * pieces[:, 1]
+    return np.argsort(-areas)
 
-    # 2. Sort piece indices in descending order of area (largest area first)
-    sorted_indices = np.argsort(-areas)  # Negative sign for descending sort
 
-    # 3. Execute actions sequentially according to the sorted order
+def run_largest_first_heuristic(env: NestingEnv, pieces: np.ndarray) -> Tuple[float, List[Tuple[float, float, float, float]]]:
+    state = env.reset(pieces=pieces)
+    sorted_indices = largest_piece_first_sequence(pieces)
+
     done = False
     for action_idx in sorted_indices:
         state, reward, done, info = env.step(action_idx)

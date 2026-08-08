@@ -4,12 +4,13 @@ Industrial Sheet Metal Nesting AI — Final Production App (`app.py`)
 Production-Ready UI supporting:
 1. Sheet Stock Dimensions (Width, Height).
 2. Interactive Custom Polygon Builder (Vertex Editor, Presets & Live Visual Canvas).
-3. Preset Puzzles: 5 Unit Squares in 2.8x2.8 Sheet, Factory Order, Custom Shapes.
+3. Research-Grade Benchmark Stack (Tiers 1, 3 & 5: Friedman Gaps, Heuristic-Traps, Permutation Invariance, CP-SAT).
 4. Multi-Angle AI Nesting Engine (0°, 45°, 90°, 135° Rotations + Shapely 2D Geometry).
 5. High-Res Layout Plot, Utilization %, Scrap Ratio, and Placement Manifest.
 """
 
 import os
+import sys
 import time
 import torch
 import numpy as np
@@ -23,6 +24,13 @@ from shapely.affinity import translate, rotate
 import shapely.validation
 
 from extensions.rotation_policy import RotationAttentionPolicy
+from eval.research_benchmarks import (
+    run_tier1_friedman_benchmark,
+    run_tier3_heuristic_trap,
+    run_tier3_permutation_invariance,
+    run_tier3_scale_shift,
+    run_tier5_exact_cpsat_solver
+)
 
 
 # ---------------------------------------------------------
@@ -44,7 +52,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown('<div class="main-header">🔩 Industrial Sheet Metal Nesting AI</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Multi-Angle Attention Policy + Interactive Custom Polygon Builder & 2D Geometry Engine</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">Multi-Angle Attention Policy + Interactive Custom Polygon Builder + Research-Grade Benchmark Stack</div>', unsafe_allow_html=True)
 
 
 # ---------------------------------------------------------
@@ -59,13 +67,8 @@ SHAPE_LIBRARY = {
 }
 
 def clean_and_build_polygon(coords: list) -> Polygon:
-    """
-    Builds a robust, non-self-intersecting 2D Polygon from any coordinate list.
-    Automatically repairs self-intersections or duplicate vertex points.
-    """
     if len(coords) < 3:
         return Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
-    
     try:
         poly = Polygon(coords)
         if not poly.is_valid:
@@ -74,7 +77,6 @@ def clean_and_build_polygon(coords: list) -> Polygon:
                 poly = max(poly.geoms, key=lambda g: g.area)
         return poly
     except Exception:
-        # Fallback to convex hull if coordinates have duplicate lines
         pts = shapely.geometry.MultiPoint(coords)
         return pts.convex_hull
 
@@ -122,9 +124,13 @@ if len(candidate_angles) == 0:
 # ---------------------------------------------------------
 # Main UI: Parts Inventory & Custom Polygon Builder
 # ---------------------------------------------------------
-st.subheader("📦 2. Parts Inventory & Custom Polygon Builder")
+st.subheader("📦 2. Parts Inventory, Custom Polygon Designer & Research Benchmarks")
 
-tab1, tab2 = st.tabs(["📝 Standard Parts Table & Presets", "✏️ Interactive Custom Polygon Designer"])
+tab1, tab2, tab3 = st.tabs([
+    "📝 Standard Parts Table & Presets",
+    "✏️ Interactive Custom Polygon Designer",
+    "🔬 Research Benchmarks & Literature Gaps"
+])
 
 with tab1:
     col_btn1, col_btn2 = st.columns(2)
@@ -171,7 +177,7 @@ with tab1:
             "Width (mm)": st.column_config.NumberColumn("Width (mm)", min_value=0.1, max_value=500.0, default=1.0, step=0.1),
             "Height (mm)": st.column_config.NumberColumn("Height (mm)", min_value=0.1, max_value=500.0, default=1.0, step=0.1),
             "Quantity": st.column_config.NumberColumn("Quantity", min_value=1, max_value=10, default=1),
-            "Custom Vertices": st.column_config.TextColumn("Custom Vertices (x,y)", help="e.g. (0,0), (40,0), (40,15), (20,15), (20,30), (0,30)")
+            "Custom Vertices": st.column_config.TextColumn("Custom Vertices (x,y)", help="e.g. (0,0), (40,0), (40,15), (15,15), (15,40), (0,40)")
         }
     )
 
@@ -248,6 +254,50 @@ with tab2:
             st.session_state["parts_df"] = pd.concat([edited_df, new_row], ignore_index=True)
             st.success(f"Added '{part_name_input}' ({part_qty_input}x) to order table!")
             st.rerun()
+
+with tab3:
+    st.markdown("### 🔬 Research-Grade Benchmark & Stress Evaluation Stack")
+    st.caption("Tests true geometric reasoning vs pattern-matching across known-optimal bounds, adversarial traps, and Google OR-Tools CP-SAT.")
+
+    if st.button("⚡ Run Live 5-Tier Research Benchmark Suite"):
+        with st.spinner("Running 5-Tier Evaluation across Friedman Bounds, Adversarial Traps, Permutation Invariance, and CP-SAT..."):
+            policy = RotationAttentionPolicy(input_dim=2, d_model=128, num_heads=8, num_layers=2, sheet_width=100.0, sheet_height=100.0)
+            if os.path.exists("model/scaled_policy.pt"):
+                ckpt = torch.load("model/scaled_policy.pt", map_location='cpu')
+                policy.load_state_dict(ckpt['model_state_dict'], strict=False)
+            policy.eval()
+
+            st.session_state["df_friedman"] = run_tier1_friedman_benchmark(policy)
+            st.session_state["res_trap"] = run_tier3_heuristic_trap(policy)
+            st.session_state["res_perm"] = run_tier3_permutation_invariance(policy, num_shuffles=5)
+            st.session_state["df_scale"] = run_tier3_scale_shift(policy)
+            st.session_state["res_cpsat"] = run_tier5_exact_cpsat_solver(policy, num_pieces=6)
+            st.success("Completed 5-Tier Research Evaluation Stack!")
+
+    if "df_friedman" in st.session_state:
+        st.markdown("#### 1. Tier 1: Friedman Known-Optimal Bounds & Exact Optimality Gaps")
+        st.dataframe(st.session_state["df_friedman"], use_container_width=True, hide_index=True)
+
+        col_r1, col_r2 = st.columns(2)
+        with col_r1:
+            st.markdown("#### 2. Tier 3A: Adversarial Heuristic-Trap Resistance")
+            for k, v in st.session_state["res_trap"].items():
+                st.write(f"**{k}**: `{v}`")
+
+        with col_r2:
+            st.markdown("#### 3. Tier 3B: Permutation Invariance & Sensitivity")
+            for k, v in st.session_state["res_perm"].items():
+                st.write(f"**{k}**: `{v}`")
+
+        col_r3, col_r4 = st.columns(2)
+        with col_r3:
+            st.markdown("#### 4. Tier 3C: Scale Shift Extrapolation (Zero-Shot)")
+            st.dataframe(st.session_state["df_scale"], use_container_width=True, hide_index=True)
+
+        with col_r4:
+            st.markdown("#### 5. Tier 5: Google OR-Tools CP-SAT Exact Global Optimum")
+            for k, v in st.session_state["res_cpsat"].items():
+                st.write(f"**{k}**: `{v}`")
 
 st.divider()
 
