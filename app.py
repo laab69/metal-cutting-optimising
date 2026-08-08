@@ -107,15 +107,19 @@ st.sidebar.divider()
 st.sidebar.header("🔄 2. Multi-Angle Rotation Choices")
 
 allow_0 = st.sidebar.checkbox("0° Upright", value=True)
-allow_45 = st.sidebar.checkbox("45° Diagonal Tilt (Solves 5-Square Puzzle!)", value=True)
+allow_45 = st.sidebar.checkbox("45° Diagonal Tilt", value=True)
 allow_90 = st.sidebar.checkbox("90° Right Angle", value=True)
 allow_135 = st.sidebar.checkbox("135° Diagonal", value=True)
+allow_180 = st.sidebar.checkbox("180° Flip (Key for Interlocking L-Brackets)", value=True)
+allow_270 = st.sidebar.checkbox("270° Rotation", value=True)
 
 candidate_angles = []
 if allow_0: candidate_angles.append(0.0)
 if allow_45: candidate_angles.append(45.0)
 if allow_90: candidate_angles.append(90.0)
 if allow_135: candidate_angles.append(135.0)
+if allow_180: candidate_angles.append(180.0)
+if allow_270: candidate_angles.append(270.0)
 
 if len(candidate_angles) == 0:
     candidate_angles = [0.0]
@@ -405,8 +409,14 @@ if st.button("⚡ EXECUTE MULTI-ANGLE AI NESTING ENGINE"):
 
             for p in placed_polygons:
                 p_minx, p_miny, p_maxx, p_maxy = p.bounds
-                candidate_xs.extend([p_maxx, p_minx - p_w, p_maxx - p_w])
-                candidate_ys.extend([p_maxy, p_miny - p_h, p_maxy - p_h])
+                candidate_xs.extend([p_maxx, p_minx, p_minx - p_w, p_maxx - p_w])
+                candidate_ys.extend([p_maxy, p_miny, p_miny - p_h, p_maxy - p_h])
+                
+                # Add inner concave vertices and notch corners
+                if hasattr(p, 'exterior'):
+                    for vx, vy in p.exterior.coords:
+                        candidate_xs.extend([vx, vx - p_w])
+                        candidate_ys.extend([vy, vy - p_h])
 
             step_val = 0.05 if sheet_width < 10 else 1.0
             candidate_xs.extend(np.arange(0.0, max(0.0, sheet_width - p_w) + 0.01, step_val))
@@ -421,7 +431,8 @@ if st.button("⚡ EXECUTE MULTI-ANGLE AI NESTING ENGINE"):
                     dist_from_center = abs(x - (sheet_width - p_w)/2.0) + abs(y - (sheet_height - p_h)/2.0)
                     grid_candidates.append((dist_from_center, x, y))
 
-            grid_candidates.sort(key=lambda c_item: -c_item[0])
+            # Prioritize bottom-left and edge contacts
+            grid_candidates.sort(key=lambda c_item: (c_item[2], c_item[1]))
 
             for _, x, y in grid_candidates:
                 shifted = translate(rot_poly, xoff=x - minx, yoff=y - miny)
