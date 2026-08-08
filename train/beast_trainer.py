@@ -77,27 +77,26 @@ def train_beast_policy(
         sheet_height=100.0
     )
 
-    # Load existing checkpoint if available
+    start_it = 151
     if os.path.exists("model/scaled_policy.pt"):
         ckpt = torch.load("model/scaled_policy.pt", map_location='cpu')
         policy.load_state_dict(ckpt['model_state_dict'], strict=False)
-        print("Successfully pre-loaded existing weights from model/scaled_policy.pt!")
+        start_it = ckpt.get('iteration', 150) + 1
+        print(f"[+] Successfully loaded existing weights! Resuming from Step {start_it}...")
 
     baseline_policy.load_state_dict(policy.state_dict())
     baseline_policy.eval()
 
     optimizer = optim.Adam(policy.parameters(), lr=lr)
 
-    # 100 Held-Out Evaluation Instances
+    # Held-Out Evaluation Instances
     np.random.seed(9999)
     eval_instances = [
         np.random.uniform(5.0, 35.0, size=(np.random.randint(min_pieces, max_pieces + 1), 2)).astype(np.float32)
         for _ in range(20)
     ]
 
-    print("[+] Computing Initial Baseline Utilization Floor on Validation Dataset...", flush=True)
-    baseline_eval_score = evaluate_policy_on_dataset(baseline_policy, eval_instances)
-    print(f"[+] Initial Baseline Utilization Floor: {baseline_eval_score:.2f}%\n", flush=True)
+    print(f"[+] Resuming Training Loop from Step {start_it} to {num_iterations}...", flush=True)
 
     history_candidate = []
     history_baseline = []
@@ -105,7 +104,7 @@ def train_beast_policy(
 
     start_time = time.time()
 
-    for it in range(1, num_iterations + 1):
+    for it in range(start_it, num_iterations + 1):
         policy.train()
 
         # Sample dynamic N pieces for this batch
